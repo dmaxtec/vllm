@@ -1,0 +1,10 @@
+{
+  "architectures": [
+    "TestModel"
+  ],
+  "auto_map": {
+    "AutoConfig": "config.TestModelConfig"
+  },
+  "_commit_hash": "",
+  "attn_implementation": ""
+}

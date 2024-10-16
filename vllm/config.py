@@ -98,6 +98,7 @@ class ModelConfig:
             the model name will be the same as `model`.
         limit_mm_per_prompt: Maximum number of data instances per modality 
             per prompt. Only applicable for multimodal models.
+        inject_multimodal_metadata: Inject multimodal metadata into the model.
         override_neuron_config: Initialize non default neuron config or 
             override default neuron config that are specific to Neuron devices, 
             this argument will be used to configure the neuron config that 
@@ -133,6 +134,7 @@ class ModelConfig:
                  skip_tokenizer_init: bool = False,
                  served_model_name: Optional[Union[str, List[str]]] = None,
                  limit_mm_per_prompt: Optional[Mapping[str, int]] = None,
+                 inject_mm_metadata: bool = False,
                  use_async_output_proc: bool = True,
                  override_neuron_config: Optional[Dict[str, Any]] = None,
                  config_format: ConfigFormat = ConfigFormat.AUTO,
@@ -195,8 +197,12 @@ class ModelConfig:
             spec_target_max_model_len=spec_target_max_model_len)
         self.served_model_name = get_served_model_name(model,
                                                        served_model_name)
+        placeholder_token_id = (
+                getattr(self.hf_config, "image_token_index", 0) 
+                or getattr(self.hf_config, "audio_token_index", 0) 
+                or getattr(self.hf_config, "placeholder_token_index", 0))
         self.multimodal_config = self._init_multimodal_config(
-            limit_mm_per_prompt)
+            limit_mm_per_prompt, inject_mm_metadata, placeholder_token_id)
         if not self.skip_tokenizer_init:
             self._verify_tokenizer_mode()
 
@@ -211,11 +217,14 @@ class ModelConfig:
         self._verify_bnb_config()
 
     def _init_multimodal_config(
-        self, limit_mm_per_prompt: Optional[Mapping[str, int]]
+        self, limit_mm_per_prompt: Optional[Mapping[str, int]],
+        inject_mm_metadata: bool, placeholder_token_id: int
     ) -> Optional["MultiModalConfig"]:
         architectures = getattr(self.hf_config, "architectures", [])
         if ModelRegistry.is_multimodal_model(architectures):
-            return MultiModalConfig(limit_per_prompt=limit_mm_per_prompt or {})
+            return MultiModalConfig(limit_per_prompt=limit_mm_per_prompt or {}
+                                    , inject_metadata=inject_mm_metadata,
+                                    placeholder_token_id=placeholder_token_id)
 
         if limit_mm_per_prompt:
             raise ValueError("`limit_mm_per_prompt` is only supported for "
@@ -1606,13 +1615,22 @@ class PromptAdapterConfig:
 
 @dataclass
 class MultiModalConfig:
-    """Controls the behavior of multimodal models."""
+    """Controls the behavior of multimodal models.
+    
+    Attributes:
+        limit_per_prompt: The maximum number of multi-modal input instances 
+            allowed per prompt for each :class:
+            `~vllm.multimodal.MultiModalPlugin`.
+        inject_metadata: Whether to pass in the multimodal metadata of the 
+            currently running sequences to the model as kwarg. Presently, this 
+            is just the number of multimodal tokens in the input.
+        placeholder_token_id: The token id for the multimodal placeholder token.
+
+    """
 
     limit_per_prompt: Mapping[str, int] = field(default_factory=dict)
-    """
-    The maximum number of multi-modal input instances allowed per prompt
-    for each :class:`~vllm.multimodal.MultiModalPlugin`.
-    """
+    inject_metadata: bool = False
+    placeholder_token_id: int = -1
 
     # TODO: Add configs to init vision tower or not.
 

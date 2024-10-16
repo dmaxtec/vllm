@@ -100,6 +100,7 @@ class ModelInputForGPU(ModelRunnerInputBase):
     prompt_adapter_mapping: Optional[PromptAdapterMapping] = None
     prompt_adapter_requests: Optional[Set[PromptAdapterRequest]] = None
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
+    seq_multimodal_tokens: Optional[torch.Tensor] = None
     request_ids_to_seq_ids: Optional[Dict[str, List[int]]] = None
     finished_requests_ids: Optional[List[str]] = None
     virtual_engine: int = 0
@@ -114,6 +115,7 @@ class ModelInputForGPU(ModelRunnerInputBase):
             "lora_requests": self.lora_requests,
             "lora_mapping": self.lora_mapping,
             "multi_modal_kwargs": self.multi_modal_kwargs,
+            "seq_multimodal_tokens": self.seq_multimodal_tokens,
             "prompt_adapter_mapping": self.prompt_adapter_mapping,
             "prompt_adapter_requests": self.prompt_adapter_requests,
             "virtual_engine": self.virtual_engine,
@@ -1033,7 +1035,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         self.multi_modal_input_mapper = mm_registry \
             .create_input_mapper(model_config)
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
-
+        if self.model_config.multimodal_config is not None:
+            self.has_multimodal_metadata = (
+                self.model_config.multimodal_config.inject_metadata
+            )
         # Lazy initialization
         self.model: nn.Module  # Set after load_model
         # Set after load_model.
@@ -1504,7 +1509,16 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                         capture_inputs[
                             "previous_hidden_states"] = previous_hidden_states[:
                                                                                batch_size]
-
+                    if self.has_multimodal_metadata:
+                        capture_inputs.update(
+                            {
+                                "seq_multimodal_tokens": torch.tensor(
+                                    [0] * batch_size,
+                                    dtype=input_tokens.dtype,
+                                    device=self.device,
+                                )
+                            }
+                        )
                     if self.has_inner_state:
                         # Only used by Mamba-based models CUDA graph atm (Jamba)
                         capture_inputs.update({
@@ -1655,6 +1669,9 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             "finished_requests_ids": model_input.finished_requests_ids,
             "request_ids_to_seq_ids": model_input.request_ids_to_seq_ids,
         } if self.has_inner_state else {}
+        multimodal_metadata_kwargs = {
+                "seq_multimodal_tokens": model_input.seq_multimodal_tokens,
+            } if self.has_multimodal_metadata else {}
         if (self.observability_config is not None
                 and self.observability_config.collect_model_forward_time):
             model_forward_start = torch.cuda.Event(enable_timing=True)
@@ -1670,7 +1687,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 intermediate_tensors=intermediate_tensors,
                 **MultiModalInputs.as_kwargs(multi_modal_kwargs,
                                              device=self.device),
-                **seqlen_agnostic_kwargs)
+                **seqlen_agnostic_kwargs, **multimodal_metadata_kwargs)
 
         if (self.observability_config is not None
                 and self.observability_config.collect_model_forward_time):
