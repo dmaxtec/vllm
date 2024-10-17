@@ -11,6 +11,7 @@ from vllm.inputs import INPUT_REGISTRY
 from vllm.inputs.data import LLMInputs
 from vllm.inputs.registry import InputContext
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
+from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.utils import is_pp_missing_parameter
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
@@ -105,12 +106,11 @@ class TextConditioningPlugin(MultiModalPlugin):
 
 MULTIMODAL_REGISTRY.register_plugin(TextConditioningPlugin())
 
-
 @MULTIMODAL_REGISTRY.register_input_mapper("text_conditioning")
 @MULTIMODAL_REGISTRY.register_max_multimodal_tokens("text_conditioning")
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_test_model)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_test_model)
-class TestModel(nn.Module):
+class TestModel(nn.Module, SupportsMultiModal):
     def __init__(self, config, cache_config, *args, **kwargs):
         super().__init__()
         self.config = config
@@ -132,7 +132,7 @@ class TestModel(nn.Module):
         input_ids = input_ids.view(seq_multimodal_tokens.shape[0], -1)
         input_ids = input_ids + seq_multimodal_tokens.unsqueeze(1)
         input_ids = input_ids.flatten()
-        out = self.emb(input_ids)
+        out = self.emb(input_ids.clip(0, self.config.vocab_size - 1))
         return out
 
     def compute_logits(
@@ -161,7 +161,7 @@ class TestModel(nn.Module):
                 ),
             }
         )
-
+    
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in weights:
@@ -174,4 +174,4 @@ class TestModel(nn.Module):
                 raise KeyError(f"{name} not in {params_dict.keys()}.")
 
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
-            weight_loader(param, loaded_weight)
+            weight_loader(param, torch.eye(*param.size(), out=torch.empty_like(param)))

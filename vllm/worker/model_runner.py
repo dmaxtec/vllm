@@ -1617,7 +1617,26 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             sampling_metadata = None
         is_prompt = (seq_group_metadata_list[0].is_prompt
                      if seq_group_metadata_list else None)
+        # For each sequence group, count the prompt tokens that represent 
+        # placeholders for the multimodal data.
+        seq_multimodal_tokens = (
+            torch.tensor(
+                [
+                    next(
+                        iter(seq_group_metadata.seq_data.values())
+                    ).prompt_token_ids.count(
+                        self.model_config.multimodal_config.placeholder_token_id
+                    )
+                    for seq_group_metadata in seq_group_metadata_list
+                ],
+                dtype=torch.long,
+                device=self.device,
+            )
+            if self.has_multimodal_metadata
+            else None
+        )
         return dataclasses.replace(model_input,
+                                   seq_multimodal_tokens=seq_multimodal_tokens,
                                    sampling_metadata=sampling_metadata,
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)

@@ -16,3 +16,4 @@ class TestModelConfig(PretrainedConfig):
     hidden_size: int = 1024
     head_size: int = 64
     num_hidden_layers: int = 24
+    placeholder_token_index: int = -1
