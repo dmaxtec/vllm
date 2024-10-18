@@ -1035,6 +1035,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         self.multi_modal_input_mapper = mm_registry \
             .create_input_mapper(model_config)
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
+        self.has_multimodal_metadata = False
         if self.model_config.multimodal_config is not None:
             self.has_multimodal_metadata = (
                 self.model_config.multimodal_config.inject_metadata
